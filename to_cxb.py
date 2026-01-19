@@ -111,13 +111,28 @@ def pack_xml_files():
         path = os.path.join(input_folder, name)
         print(f"Processing {name}...")
         
-        # Read file in binary mode to preserve exact content
-        with open(path, "rb") as f:
-            xml_data = f.read()
+        try:
+            # First try UTF-8, fall back to ISO-8859-1 if that fails
+            try:
+                with open(path, "r", encoding='utf-8') as f:
+                    # Read all lines and remove leading/trailing whitespace
+                    lines = [line.strip() for line in f]
+            except UnicodeDecodeError:
+                with open(path, "r", encoding='iso-8859-1') as f:
+                    # Read all lines and remove leading/trailing whitespace
+                    lines = [line.strip() for line in f]
+            
+            # Join lines without any extra spaces or newlines between them
+            xml_content = ''.join(lines)
+            # Convert back to bytes
+            xml_data = xml_content.encode('utf-8')
 
-        # Ensure the XML ends with a null byte
-        if not xml_data.endswith(b'\x00'):
-            xml_data += b'\x00'
+            # Ensure the XML ends with a null byte
+            if not xml_data.endswith(b'\x00'):
+                xml_data += b'\x00'
+        except Exception as e:
+            print(f"⚠️  Warning: Could not process {name} - {str(e)}. Skipping...")
+            continue
 
         uncompressed_size = len(xml_data)
         compressed_data = compress_LZO2A_999(xml_data)

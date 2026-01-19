@@ -5,6 +5,67 @@ import os
 import sys
 import ctypes
 from zlib import adler32
+from pathlib import Path
+
+def format_xml_minimal(file_path):
+    """
+    Format an XML file with proper indentation.
+    This function is called automatically after extraction.
+    """
+    try:
+        # Read the file in binary to preserve exact bytes
+        with open(file_path, 'rb') as f:
+            content = f.read().decode('utf-8')
+        
+        # Split into lines
+        lines = content.splitlines()
+        
+        # Process each line
+        output = []
+        indent_level = 0
+        prev_line_was_opening = False
+        
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+                
+            # Check if this is a closing tag
+            if line.startswith('</'):
+                indent_level = max(0, indent_level - 1)
+            
+            # Add the line with proper indentation
+            output.append('  ' * indent_level + line)
+            
+            # Check if this is an opening tag that's not self-closing
+            if (line.startswith('<') and not line.startswith('</') and 
+                not line.endswith('/>') and not line.endswith('?>') and
+                not line.startswith('<?xml')):
+                indent_level += 1
+                
+            # Special handling for self-closing tags
+            if line.endswith('/>'):
+                prev_line_was_opening = False
+            else:
+                prev_line_was_opening = line.startswith('<') and not line.startswith('</')
+        
+        # Join lines with newlines
+        result = '\n'.join(output)
+        
+        # Ensure we end with a newline
+        if not result.endswith('\n'):
+            result += '\n'
+            
+        # Write back the file
+        with open(file_path, 'wb') as f:
+            f.write(result.encode('utf-8'))
+            
+        print(f"Formatted: {os.path.basename(file_path)}")
+        return True
+        
+    except Exception as e:
+        print(f"Error processing {file_path}: {str(e)}")
+        return False
 
 # Try to load LZO2 library with different possible names/paths
 lzo2 = None
@@ -237,5 +298,22 @@ for i in range(len(indices)):
             with open(f_out, "wb") as f:
                 f.write(full_data)
             print(f"Saved decompressed data to {f_out}")
+            
+            # Format the extracted XML file
+            format_xml_minimal(f_out)
     except Exception as e:
         print(f"Decompression failed: {e}")
+
+if __name__ == "__main__":
+    # Create output directory if it doesn't exist
+    if not os.path.exists("xml_folder"):
+        os.makedirs("xml_folder")
+        print(f"Created directory: {os.path.abspath('xml_folder')}")
+        
+    # Run the extraction and formatting
+    try:
+        # The actual execution happens when the script is imported
+        pass
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        sys.exit(1)
