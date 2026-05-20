@@ -182,7 +182,7 @@ def pack_xml_files():
         file_datas.append(file_data)
 
         # Build FileInfo
-        name_buffer = name.split(".")[0].encode("ascii").ljust(32, b"\x00")
+        name_buffer = name.split(".")[0].encode("ascii").ljust(40, b"\x00")
         size_str = str(len(file_data)).encode("ascii").ljust(8, b"\x00")
         file_info = name_buffer + size_str
         file_infos.append(file_info)
@@ -194,7 +194,7 @@ def pack_xml_files():
         f.write(all_infos)
         
         # Write end marker
-        f.write(b"0".ljust(40, b"\x00"))
+        f.write(b"0".ljust(48, b"\x00"))
         
         # Write file datas
         all_data = b''.join(file_datas)
