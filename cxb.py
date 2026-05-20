@@ -6,10 +6,12 @@ import sys
 import ctypes
 from zlib import adler32
 from pathlib import Path
+import xml.etree.ElementTree as ET
+from xml.dom import minidom
 
 def format_xml_minimal(file_path):
     """
-    Format an XML file with proper indentation.
+    Format an XML file with proper indentation and structure.
     This function is called automatically after extraction.
     """
     try:
@@ -17,45 +19,47 @@ def format_xml_minimal(file_path):
         with open(file_path, 'rb') as f:
             content = f.read().decode('utf-8')
         
-        # Split into lines
-        lines = content.splitlines()
+        # Parse the XML content
+        try:
+            root = ET.fromstring(content)
+        except ET.ParseError as e:
+            print(f"Warning: XML parsing error in {file_path}: {e}")
+            # Try to fix common XML issues
+            content = fix_xml_issues(content)
+            try:
+                root = ET.fromstring(content)
+            except ET.ParseError:
+                print(f"Could not fix XML structure in {file_path}")
+                return False
         
-        # Process each line
-        output = []
-        indent_level = 0
-        prev_line_was_opening = False
+        # Convert to string with proper formatting
+        rough_string = ET.tostring(root, encoding='unicode')
         
-        for line in lines:
-            line = line.strip()
-            if not line:
-                continue
-                
-            # Check if this is a closing tag
-            if line.startswith('</'):
-                indent_level = max(0, indent_level - 1)
-            
-            # Add the line with proper indentation
-            output.append('  ' * indent_level + line)
-            
-            # Check if this is an opening tag that's not self-closing
-            if (line.startswith('<') and not line.startswith('</') and 
-                not line.endswith('/>') and not line.endswith('?>') and
-                not line.startswith('<?xml')):
-                indent_level += 1
-                
-            # Special handling for self-closing tags
-            if line.endswith('/>'):
-                prev_line_was_opening = False
-            else:
-                prev_line_was_opening = line.startswith('<') and not line.startswith('</')
+        # Parse with minidom for pretty printing
+        reparsed = minidom.parseString(rough_string)
         
-        # Join lines with newlines
-        result = '\n'.join(output)
+        # Format with proper indentation
+        formatted_xml = reparsed.toprettyxml(indent="  ", encoding=None)
         
-        # Ensure we end with a newline
+        # Clean up the formatting - remove extra blank lines and fix XML declaration
+        lines = formatted_xml.split('\n')
+        cleaned_lines = []
+        
+        for i, line in enumerate(lines):
+            line = line.rstrip()
+            if line:  # Skip empty lines
+                # Fix XML declaration to be on first line without extra whitespace
+                if line.strip().startswith('<?xml'):
+                    cleaned_lines.append('<?xml version="1.0"?>')
+                else:
+                    # Keep all other lines including root elements
+                    cleaned_lines.append(line)
+        
+        # Join lines and ensure proper ending
+        result = '\n'.join(cleaned_lines)
         if not result.endswith('\n'):
             result += '\n'
-            
+        
         # Write back the file
         with open(file_path, 'wb') as f:
             f.write(result.encode('utf-8'))
@@ -66,6 +70,23 @@ def format_xml_minimal(file_path):
     except Exception as e:
         print(f"Error processing {file_path}: {str(e)}")
         return False
+
+def fix_xml_issues(content):
+    """
+    Fix common XML structural issues.
+    """
+    # Remove null bytes if present
+    content = content.replace('\x00', '')
+    
+    # Ensure content starts with XML declaration if it has one
+    if not content.strip().startswith('<?xml') and '<root>' in content:
+        content = '<?xml version="1.0"?>' + content
+    
+    # Fix missing closing tags (basic attempt)
+    # This is a simple fix - more complex issues would require more sophisticated parsing
+    content = re.sub(r'<([^<>]+)([^/>]*)>', lambda m: f'<{m.group(1)}{m.group(2)}>' if m.group(2).endswith('/') else f'<{m.group(1)}{m.group(2)}>', content)
+    
+    return content
 
 # Try to load LZO2 library with different possible names/paths
 lzo2 = None
@@ -131,16 +152,18 @@ def decompress_LZO2A(compressed_data, expected_decompressed_size):
     return dst.raw
 
 # Create output directory if it doesn't exist
-output_dir = "xml_folder"
+script_dir = os.path.dirname(os.path.abspath(__file__))
+output_dir = os.path.join(script_dir, "xml_folder")
 if not os.path.exists(output_dir):
     os.makedirs(output_dir)
     print(f"Created directory: {os.path.abspath(output_dir)}")
 
-# Find all .cxb files in the current directory
-cxb_files = [f for f in os.listdir('.') if f.lower().endswith('.cxb')]
+# Find all .cxb files in the script's directory
+script_dir = os.path.dirname(os.path.abspath(__file__))
+cxb_files = [f for f in os.listdir(script_dir) if f.lower().endswith('.cxb')]
 
 if not cxb_files:
-    raise FileNotFoundError("No .cxb files found in the current directory")
+    raise FileNotFoundError(f"No .cxb files found in the script directory: {script_dir}")
 
 # Let user select a file
 print("\nAvailable .cxb files:")
@@ -151,11 +174,11 @@ while True:
     try:
         selection = input(f"\nSelect a file (1-{len(cxb_files)}, or press Enter for first file): ")
         if not selection:
-            binary_file_path = cxb_files[0]  # Default to first file if no input
+            binary_file_path = os.path.join(script_dir, cxb_files[0])  # Default to first file if no input
             break
         idx = int(selection) - 1
         if 0 <= idx < len(cxb_files):
-            binary_file_path = cxb_files[idx]
+            binary_file_path = os.path.join(script_dir, cxb_files[idx])
             break
         print(f"Please enter a number between 1 and {len(cxb_files)}")
     except ValueError:
@@ -284,7 +307,6 @@ for i in range(len(indices)):
                 break
 
         # Create output directory if it doesn't exist
-        output_dir = "xml_folder"
         if not os.path.exists(output_dir):
             os.makedirs(output_dir)
             print(f"Created directory: {os.path.abspath(output_dir)}")
@@ -294,7 +316,7 @@ for i in range(len(indices)):
         if full_data:
             if full_data.endswith(b'\x00'):
                 full_data = full_data[:-1]
-            f_out = f"xml_folder/{segments[i][0]}.xml"
+            f_out = os.path.join(output_dir, f"{segments[i][0]}.xml")
             with open(f_out, "wb") as f:
                 f.write(full_data)
             print(f"Saved decompressed data to {f_out}")
@@ -306,9 +328,11 @@ for i in range(len(indices)):
 
 if __name__ == "__main__":
     # Create output directory if it doesn't exist
-    if not os.path.exists("xml_folder"):
-        os.makedirs("xml_folder")
-        print(f"Created directory: {os.path.abspath('xml_folder')}")
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    xml_folder = os.path.join(script_dir, "xml_folder")
+    if not os.path.exists(xml_folder):
+        os.makedirs(xml_folder)
+        print(f"Created directory: {os.path.abspath(xml_folder)}")
         
     # Run the extraction and formatting
     try:

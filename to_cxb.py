@@ -84,19 +84,23 @@ COMP_BUFFER_SIZE = 0
 
 def pack_xml_files():
     # Input folder
-    input_folder = "xml_folder"
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    input_folder = os.path.join(script_dir, "xml_folder")
 
-    # Find the highest existing version number
-    version = 1
-    for f in os.listdir('.'):
-        if f.startswith('gamesettings_c16233_V') and f.endswith('.cxb'):
-            try:
-                v = int(f.split('_V')[-1].split('.')[0])
-                version = max(version, v + 1)
-            except (ValueError, IndexError):
-                pass
-
-    output_file = f"gamesettings_c16233_V{version}.cxb"
+    # Ask user for full filename
+    while True:
+        try:
+            filename = input("Enter full filename to save as (including .cxb extension): ").strip()
+            if not filename:
+                print("Filename cannot be empty.")
+                continue
+            if not filename.lower().endswith('.cxb'):
+                filename += '.cxb'
+            output_file = os.path.join(script_dir, filename)
+            break
+        except KeyboardInterrupt:
+            print("\nOperation cancelled.")
+            return
 
     # Get all XML files from the input folder
     file_names = [f for f in os.listdir(input_folder) if f.lower().endswith('.xml')]
@@ -178,7 +182,7 @@ def pack_xml_files():
         file_datas.append(file_data)
 
         # Build FileInfo
-        name_buffer = name.split(".")[0].encode("ascii").ljust(40, b"\x00")
+        name_buffer = name.split(".")[0].encode("ascii").ljust(32, b"\x00")
         size_str = str(len(file_data)).encode("ascii").ljust(8, b"\x00")
         file_info = name_buffer + size_str
         file_infos.append(file_info)
@@ -190,7 +194,7 @@ def pack_xml_files():
         f.write(all_infos)
         
         # Write end marker
-        f.write(b"0".ljust(48, b"\x00"))
+        f.write(b"0".ljust(40, b"\x00"))
         
         # Write file datas
         all_data = b''.join(file_datas)
