@@ -18,7 +18,7 @@ def format_xml_minimal(file_path):
         # Read the file in binary to preserve exact bytes
         with open(file_path, 'rb') as f:
             content = f.read().decode('utf-8')
-        
+
         # Parse the XML content
         try:
             root = ET.fromstring(content)
@@ -31,20 +31,20 @@ def format_xml_minimal(file_path):
             except ET.ParseError:
                 print(f"Could not fix XML structure in {file_path}")
                 return False
-        
+
         # Convert to string with proper formatting
         rough_string = ET.tostring(root, encoding='unicode')
-        
+
         # Parse with minidom for pretty printing
         reparsed = minidom.parseString(rough_string)
-        
+
         # Format with proper indentation
         formatted_xml = reparsed.toprettyxml(indent="  ", encoding=None)
-        
+
         # Clean up the formatting - remove extra blank lines and fix XML declaration
         lines = formatted_xml.split('\n')
         cleaned_lines = []
-        
+
         for i, line in enumerate(lines):
             line = line.rstrip()
             if line:  # Skip empty lines
@@ -54,19 +54,19 @@ def format_xml_minimal(file_path):
                 else:
                     # Keep all other lines including root elements
                     cleaned_lines.append(line)
-        
+
         # Join lines and ensure proper ending
         result = '\n'.join(cleaned_lines)
         if not result.endswith('\n'):
             result += '\n'
-        
+
         # Write back the file
         with open(file_path, 'wb') as f:
             f.write(result.encode('utf-8'))
-            
+
         print(f"Formatted: {os.path.basename(file_path)}")
         return True
-        
+
     except Exception as e:
         print(f"Error processing {file_path}: {str(e)}")
         return False
@@ -77,15 +77,15 @@ def fix_xml_issues(content):
     """
     # Remove null bytes if present
     content = content.replace('\x00', '')
-    
+
     # Ensure content starts with XML declaration if it has one
     if not content.strip().startswith('<?xml') and '<root>' in content:
         content = '<?xml version="1.0"?>' + content
-    
+
     # Fix missing closing tags (basic attempt)
     # This is a simple fix - more complex issues would require more sophisticated parsing
     content = re.sub(r'<([^<>]+)([^/>]*)>', lambda m: f'<{m.group(1)}{m.group(2)}>' if m.group(2).endswith('/') else f'<{m.group(1)}{m.group(2)}>', content)
-    
+
     return content
 
 # Try to load LZO2 library with different possible names/paths
@@ -113,14 +113,14 @@ for path in lzo_paths:
 if lzo2 is None:
     script_dir = os.path.dirname(os.path.abspath(__file__))
     dll_path = os.path.join(script_dir, 'lzo2.dll')
-    
+
     print("="*80)
     print("LZO2 library not found. To fix this:")
     print(f"1. Download 'lzo2.dll' from a trusted source")
     print(f"2. Save it to: {dll_path}")
     print("3. Run the script again")
     print("="*80)
-    
+
     # Create a placeholder file with instructions
     with open(os.path.join(script_dir, 'GET_LZO2_DLL.txt'), 'w') as f:
         f.write("INSTRUCTIONS TO GET LZO2.DLL\n")
@@ -130,7 +130,7 @@ if lzo2 is None:
         f.write("   - Or search for 'lzo2.dll download for Windows'\n")
         f.write(f"2. Place the downloaded 'lzo2.dll' in this directory:\n   {script_dir}\\n")
         f.write("3. Run the script again\n")
-    
+
     raise ImportError("LZO2 library not found. Please follow the instructions above.")
 
 def decompress_LZO2A(compressed_data, expected_decompressed_size):
@@ -158,29 +158,32 @@ if not os.path.exists(output_dir):
     os.makedirs(output_dir)
     print(f"Created directory: {os.path.abspath(output_dir)}")
 
-# Find all .cxb files in the script's directory
+# Find all supported archive files in the script's directory
 script_dir = os.path.dirname(os.path.abspath(__file__))
-cxb_files = [f for f in os.listdir(script_dir) if f.lower().endswith('.cxb')]
+archive_files = [
+    f for f in os.listdir(script_dir)
+    if f.lower().endswith(('.cxb', '.smallpox'))
+]
 
-if not cxb_files:
-    raise FileNotFoundError(f"No .cxb files found in the script directory: {script_dir}")
+if not archive_files:
+    raise FileNotFoundError(f"No .cxb or .smallpox files found in the script directory: {script_dir}")
 
 # Let user select a file
-print("\nAvailable .cxb files:")
-for i, file in enumerate(cxb_files, 1):
+print("\nAvailable archive files:")
+for i, file in enumerate(archive_files, 1):
     print(f"{i}. {file}")
 
 while True:
     try:
-        selection = input(f"\nSelect a file (1-{len(cxb_files)}, or press Enter for first file): ")
+        selection = input(f"\nSelect a file (1-{len(archive_files)}, or press Enter for first file): ")
         if not selection:
-            binary_file_path = os.path.join(script_dir, cxb_files[0])  # Default to first file if no input
+            binary_file_path = os.path.join(script_dir, archive_files[0])  # Default to first file if no input
             break
         idx = int(selection) - 1
-        if 0 <= idx < len(cxb_files):
-            binary_file_path = os.path.join(script_dir, cxb_files[idx])
+        if 0 <= idx < len(archive_files):
+            binary_file_path = os.path.join(script_dir, archive_files[idx])
             break
-        print(f"Please enter a number between 1 and {len(cxb_files)}")
+        print(f"Please enter a number between 1 and {len(archive_files)}")
     except ValueError:
         print("Please enter a valid number")
 
@@ -217,22 +220,12 @@ def extract_starting_bytes(data, n, to_int = False):
         d = int.from_bytes(d, byteorder="little")
     return d, data[n:]
 
-pre_magic_data = data[:indices[0]]
+archive_ext = os.path.splitext(binary_file_path)[1].lower()
 
-# convert to string
-decoded = ''.join(chr(b) if chr(b) in string.printable else ' ' for b in pre_magic_data)
-
-# remove padding
-segments = [s for s in re.split(r'\s+', decoded) if s]
-
-print("Extracted segments:")
-segments = [(segments[i], int(segments[i + 1])) for i in range(0, len(segments) - 2, 2)]
-print("XML, size:", segments)
-for i in range(len(indices)):
-    print(f"Analyzing {segments[i][0]}")
-    index = indices[i]
+def extract_archive_entry(entry_name, entry_size, entry_index, use_pre_magic_name):
+    index = entry_index
     start = index - 4
-    end = start + segments[i][1]
+    end = start + entry_size
     s = data[start:end]
     size, s = extract_starting_bytes(s, 4)
     size = int.from_bytes(size, byteorder='little') # size of the actual XML # type: ignore
@@ -248,7 +241,8 @@ for i in range(len(indices)):
     Algo: {algo}
     Decompression buffer size: {de_bufsize}
     Compression buffer size: {en_bufsize}""")
-    ref = f"{segments[i][0]}.xml"
+
+    ref = f"{entry_name}.xml"
     if os.path.exists(ref):
         print(f"\nReference file size: {os.path.getsize(ref)}\n")
     else:
@@ -272,6 +266,8 @@ for i in range(len(indices)):
                     offset += 4
                     checksum = int.from_bytes(s[offset:offset+4], "little")
                     offset += 4
+                    if en_size == 0 and de_size == 0 and checksum == 0:
+                        break
                     print(f"""Block data:
                             Compressed: {is_compressed}
                             Decompression size: {de_size}
@@ -293,6 +289,8 @@ for i in range(len(indices)):
                 else:
                     # Uncompressed block
                     data_size = int.from_bytes(s[offset:offset+4], "little")
+                    if data_size == 0:
+                        break
                     print(f"""Block data:
                         Compressed: {is_compressed}
                         Data size: {data_size}
@@ -314,17 +312,48 @@ for i in range(len(indices)):
         # Combine all chunks
         full_data = b"".join(chunks)
         if full_data:
-            if full_data.endswith(b'\x00'):
-                full_data = full_data[:-1]
-            f_out = os.path.join(output_dir, f"{segments[i][0]}.xml")
+            f_out = os.path.join(output_dir, f"{entry_name}.xml")
             with open(f_out, "wb") as f:
                 f.write(full_data)
             print(f"Saved decompressed data to {f_out}")
-            
-            # Format the extracted XML file
-            format_xml_minimal(f_out)
+
+            if archive_ext == ".cxb":
+                format_xml_minimal(f_out)
     except Exception as e:
         print(f"Decompression failed: {e}")
+
+def extract_cxb_archive(binary_file_path, data):
+    pre_magic_data = data[:indices[0]]
+
+    # convert to string
+    decoded = ''.join(chr(b) if chr(b) in string.printable else ' ' for b in pre_magic_data)
+
+    # remove padding
+    segments = [s for s in re.split(r'\s+', decoded) if s]
+
+    print("Extracted segments:")
+    segments = [(segments[i], int(segments[i + 1])) for i in range(0, len(segments) - 2, 2)]
+    print("XML, size:", segments)
+    for i in range(len(indices)):
+        print(f"Analyzing {segments[i][0]}")
+        extract_archive_entry(segments[i][0], segments[i][1], indices[i], True)
+
+def extract_smallpox_archive(binary_file_path, data):
+    archive_stem = os.path.splitext(os.path.basename(binary_file_path))[0]
+
+    print("Extracted segments:")
+    print("XML, size: []")
+    for i in range(len(indices)):
+        entry_name = archive_stem if len(indices) == 1 else f"{archive_stem}_{i + 1}"
+        print(f"Analyzing {entry_name}")
+        extract_archive_entry(entry_name, len(data) - (indices[i] - 4), indices[i], False)
+
+if archive_ext == ".cxb":
+    extract_cxb_archive(binary_file_path, data)
+elif archive_ext == ".smallpox":
+    extract_smallpox_archive(binary_file_path, data)
+else:
+    raise ValueError(f"Unsupported archive extension: {archive_ext}")
 
 if __name__ == "__main__":
     # Create output directory if it doesn't exist

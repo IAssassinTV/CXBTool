@@ -75,6 +75,54 @@ def compress_LZO2A_999(data: bytes) -> bytes:
 
     return bytes(dst[:dst_len.value])
 
+def read_xml_as_bytes(path: str) -> bytes:
+    # Preserve the XML bytes exactly as stored on disk.
+    with open(path, "rb") as f:
+        xml_data = f.read()
+
+    # Ensure the XML ends with a null byte
+    if not xml_data.endswith(b'\x00'):
+        xml_data += b'\x00'
+
+    return xml_data
+
+def build_file_data(xml_data: bytes) -> bytes:
+    uncompressed_size = len(xml_data)
+
+    # Split XML into chunks of DECOMP_BUFFER_SIZE
+    chunks = [
+        xml_data[i:i + DECOMP_BUFFER_SIZE]
+        for i in range(0, len(xml_data), DECOMP_BUFFER_SIZE)
+    ]
+
+    blocks = []
+    for chunk in chunks:
+        de_size = len(chunk)
+        comp_data = compress_LZO2A_999(chunk)
+        en_size = len(comp_data)
+        checksum = adler32(comp_data, 0)
+
+        block = struct.pack(
+            "<BIII",  # is_compressed = 1, de_size, en_size, checksum
+            1,
+            en_size,
+            de_size,
+            checksum,
+        ) + comp_data
+
+        blocks.append(block)
+
+    # Build CompressedFileData
+    return struct.pack(
+        "<I Q H B H H",  # size, magic, version, algo, de_bufsize, en_bufsize
+        uncompressed_size,
+        MAGIC,
+        VERSION,
+        ALGO,
+        DECOMP_BUFFER_SIZE,
+        COMP_BUFFER_SIZE,
+    ) + b"".join(blocks)
+
 # Constants
 MAGIC = 0x1004FA9957FBAA33
 VERSION = 1
@@ -90,23 +138,64 @@ def pack_xml_files():
     # Ask user for full filename
     while True:
         try:
-            filename = input("Enter full filename to save as (including .cxb extension): ").strip()
+            filename = input("Enter full filename to save as (including .cxb or .smallpox extension): ").strip()
             if not filename:
                 print("Filename cannot be empty.")
                 continue
-            if not filename.lower().endswith('.cxb'):
-                filename += '.cxb'
+            if not filename.lower().endswith(('.cxb', '.smallpox')):
+                print("Please save the file with either a .cxb or .smallpox extension.")
+                continue
             output_file = os.path.join(script_dir, filename)
+            output_ext = os.path.splitext(output_file)[1].lower()
             break
         except KeyboardInterrupt:
             print("\nOperation cancelled.")
             return
 
     # Get all XML files from the input folder
-    file_names = [f for f in os.listdir(input_folder) if f.lower().endswith('.xml')]
+    file_names = sorted(f for f in os.listdir(input_folder) if f.lower().endswith('.xml'))
 
-    # Sort files to ensure consistent ordering
-    file_names.sort()
+    if output_ext == '.smallpox':
+        preferred_name = os.path.splitext(os.path.basename(output_file))[0] + '.xml'
+        preferred_path = os.path.join(input_folder, preferred_name)
+
+        if os.path.exists(preferred_path):
+            selected_files = [preferred_name]
+        elif len(file_names) == 1:
+            selected_files = file_names
+        else:
+            print("Available XML files:")
+            for i, file in enumerate(file_names, 1):
+                print(f"{i}. {file}")
+
+            while True:
+                try:
+                    selection = input(f"Select the XML file to pack (1-{len(file_names)}): ").strip()
+                    idx = int(selection) - 1
+                    if 0 <= idx < len(file_names):
+                        selected_files = [file_names[idx]]
+                        break
+                    print(f"Please enter a number between 1 and {len(file_names)}")
+                except ValueError:
+                    print("Please enter a valid number")
+
+        name = selected_files[0]
+        path = os.path.join(input_folder, name)
+        print(f"Processing {name}...")
+
+        try:
+            xml_data = read_xml_as_bytes(path)
+        except Exception as e:
+            print(f"⚠️  Warning: Could not process {name} - {str(e)}.")
+            return
+
+        file_data = build_file_data(xml_data)
+
+        with open(output_file, "wb") as f:
+            f.write(file_data + b"\x01")
+
+        print(f"✅ Successfully created {output_file} with 1 XML file")
+        return
 
     file_infos = []
     file_datas = []
@@ -114,71 +203,14 @@ def pack_xml_files():
     for name in file_names:
         path = os.path.join(input_folder, name)
         print(f"Processing {name}...")
-        
-        try:
-            # First try UTF-8, fall back to ISO-8859-1 if that fails
-            try:
-                with open(path, "r", encoding='utf-8') as f:
-                    # Read all lines and remove leading/trailing whitespace
-                    lines = [line.strip() for line in f]
-            except UnicodeDecodeError:
-                with open(path, "r", encoding='iso-8859-1') as f:
-                    # Read all lines and remove leading/trailing whitespace
-                    lines = [line.strip() for line in f]
-            
-            # Join lines without any extra spaces or newlines between them
-            xml_content = ''.join(lines)
-            # Convert back to bytes
-            xml_data = xml_content.encode('utf-8')
 
-            # Ensure the XML ends with a null byte
-            if not xml_data.endswith(b'\x00'):
-                xml_data += b'\x00'
+        try:
+            xml_data = read_xml_as_bytes(path)
         except Exception as e:
             print(f"⚠️  Warning: Could not process {name} - {str(e)}. Skipping...")
             continue
 
-        uncompressed_size = len(xml_data)
-        compressed_data = compress_LZO2A_999(xml_data)
-        compressed_size = len(compressed_data)
-        
-        # Split XML into chunks of DECOMP_BUFFER_SIZE
-        chunks = [
-            xml_data[i:i + DECOMP_BUFFER_SIZE]
-            for i in range(0, len(xml_data), DECOMP_BUFFER_SIZE)
-        ]
-
-        blocks = []
-        for chunk in chunks:
-            de_size = len(chunk)
-            comp_data = compress_LZO2A_999(chunk)
-            en_size = len(comp_data)
-            checksum = adler32(comp_data, 0)
-
-            block = struct.pack(
-                "<BIII",  # is_compressed = 1, de_size, en_size, checksum
-                1,
-                en_size,
-                de_size,
-                checksum,
-            ) + comp_data
-
-            blocks.append(block)
-
-        # Combine all blocks
-        all_blocks = b"".join(blocks)
-
-        # Build CompressedFileData
-        file_data = struct.pack(
-            "<I Q H B H H",  # size, magic, version, algo, de_bufsize, en_bufsize
-            uncompressed_size,
-            MAGIC,
-            VERSION,
-            ALGO,
-            DECOMP_BUFFER_SIZE,
-            COMP_BUFFER_SIZE,
-        ) + all_blocks
-
+        file_data = build_file_data(xml_data)
         file_datas.append(file_data)
 
         # Build FileInfo
@@ -192,10 +224,10 @@ def pack_xml_files():
         # Write file infos
         all_infos = b''.join(file_infos)
         f.write(all_infos)
-        
+
         # Write end marker
         f.write(b"0".ljust(48, b"\x00"))
-        
+
         # Write file datas
         all_data = b''.join(file_datas)
         f.write(all_data)
